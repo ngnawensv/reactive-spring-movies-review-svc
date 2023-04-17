@@ -9,12 +9,14 @@ import moviesreviewsvc.exeception.ReviewDataException;
 import moviesreviewsvc.repository.ReviewRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 
 import org.springframework.web.reactive.function.server.ServerRequest;
 import org.springframework.web.reactive.function.server.ServerResponse;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 
 @Component
 @Slf4j
@@ -24,6 +26,8 @@ public class ReviewHandler {
   @Autowired
   private Validator validator;
 
+  Sinks.Many<Review> reviewSink = Sinks.many().replay().all();
+
   public ReviewHandler(ReviewRepository reviewRepository) {
     this.reviewRepository = reviewRepository;
   }
@@ -31,7 +35,8 @@ public class ReviewHandler {
   public Mono<ServerResponse> addReview(ServerRequest request) {
     return request.bodyToMono(Review.class) //Extracting the request body
         .doOnNext(this::validate)
-        .flatMap(reviewRepository::save) //Saving the actual review
+        .flatMap(reviewRepository::save)
+        .doOnNext(review -> reviewSink.tryEmitNext(review))//Saving the actual review
         .flatMap(
             saveReview -> ServerResponse.status(HttpStatus.CREATED) //Building the status response
                 .bodyValue(saveReview));
@@ -83,5 +88,10 @@ public class ReviewHandler {
         .then(ServerResponse.noContent().build())  //Construct the new response because the delete method return the Mono<Void>
     );
 
+  }
+
+  public Mono<ServerResponse> getReviewsStream(ServerRequest request) {
+    return ServerResponse.ok().contentType(MediaType.APPLICATION_NDJSON)
+        .body(reviewSink.asFlux(),Review.class).log();
   }
 }
